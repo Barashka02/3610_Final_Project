@@ -11,8 +11,8 @@ entity TOP is
         btn_down    : in  STD_LOGIC;
         btn_select  : in  STD_LOGIC;
         sdata_out   : out STD_LOGIC;
-        an_out      : out STD_LOGIC_VECTOR (3 downto 0);
-        cat_out     : out STD_LOGIC_VECTOR (6 downto 0)
+        an      : out STD_LOGIC_VECTOR (3 downto 0);
+        cat     : out STD_LOGIC_VECTOR (6 downto 0)
     );
 end TOP;
 
@@ -31,8 +31,8 @@ architecture Behavioral of TOP is
             bram_din      : out STD_LOGIC_VECTOR(7 downto 0);
             bram_we       : out STD_LOGIC_VECTOR(0 downto 0);
             update_display: out STD_LOGIC;
-            an        : out STD_LOGIC_VECTOR (3 downto 0); 
-            cat      : out STD_LOGIC_VECTOR (6 downto 0) 
+            an_s        : out STD_LOGIC_VECTOR (3 downto 0); 
+            cat_s      : out STD_LOGIC_VECTOR (6 downto 0) 
             -- Removed cur_position output
         );
     end component;
@@ -99,8 +99,8 @@ begin
             bram_din       => bram_din,
             bram_we        => bram_we,
             update_display => update_display,
-            cat            => cat_out,
-            an             => an_out
+            cat_s            => cat,
+            an_s             => an
             -- Removed cur_position mapping
         );
 
