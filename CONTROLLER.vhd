@@ -30,6 +30,7 @@ architecture Behavioral of Controller is
     signal game_board      : game_board_type := (others => "00"); -- '00' for empty, '01' for 'O', '10' for 'X'
     signal winner_flag     : STD_LOGIC := '0';                    -- '0' for no winner, '1' for winner
     signal current_player  : STD_LOGIC_VECTOR(1 downto 0) := "01";-- '01' for 'O', '10' for 'X'
+    signal last_player     : STD_LOGIC_VECTOR(1 downto 0) := "01";-- '01' for 'O', '10' for 'X'
     signal move_count      : INTEGER range 0 to 9 := 0;           -- Counts the number of moves made
     signal game_over       : STD_LOGIC := '0';                    -- '1' when game is over
 
@@ -43,6 +44,23 @@ architecture Behavioral of Controller is
     signal btn_left_prev   : STD_LOGIC := '0';
     signal btn_up_prev     : STD_LOGIC := '0';
     signal btn_down_prev   : STD_LOGIC := '0';
+    -- Removed 'reseTting' and 'resetting' signals
+    -- Debounce Parameters
+    constant DEBOUNCE_THRESHOLD : integer := 100000; -- Adjust based on clock frequency and desired debounce time
+
+    -- Debounce Counters
+    signal btn_right_cnt  : integer := 0;
+    signal btn_left_cnt   : integer := 0;
+    signal btn_up_cnt     : integer := 0;
+    signal btn_down_cnt   : integer := 0;
+    signal btn_select_cnt : integer := 0;
+
+    -- Debounced Button Signals
+    signal btn_right_debounced  : STD_LOGIC := '0';
+    signal btn_left_debounced   : STD_LOGIC := '0';
+    signal btn_up_debounced     : STD_LOGIC := '0';
+    signal btn_down_debounced   : STD_LOGIC := '0';
+    signal btn_select_debounced : STD_LOGIC := '0';
 
     -- Seven-segment display signals
     constant SEG_OFF : STD_LOGIC_VECTOR(6 downto 0) := "1111111"; -- All segments off
@@ -50,6 +68,10 @@ architecture Behavioral of Controller is
     constant SEG_X   : STD_LOGIC_VECTOR(6 downto 0) := "1001000"; -- Segments to display 'X'
     signal display_seg : STD_LOGIC_VECTOR(6 downto 0);
     signal display_an  : STD_LOGIC_VECTOR(3 downto 0);
+
+    -- FSM States
+    type state_type is (GAME, END_GAME);
+    signal current_state, next_state : state_type := GAME;
 
     -- Declare integer_array and combo_type types
     type integer_array is array (0 to 2) of integer;
@@ -80,6 +102,17 @@ architecture Behavioral of Controller is
     end function;
 
 begin
+    -- FSM State Transition
+    process(clk, rst)
+    begin
+        if rst = '1' then
+            current_state <= GAME;
+        elsif rising_edge(clk) then
+            current_state <= next_state;
+        end if;
+    end process;
+
+    -- Main Process Handling All States
     process(clk, rst)
         variable buttons           : STD_LOGIC_VECTOR(4 downto 0);
         variable pos_index_var     : integer range 0 to 8;
@@ -89,69 +122,121 @@ begin
         variable game_over_var     : STD_LOGIC;
     begin
         if rst = '1' then
-            -- Initialization on reset
+            -- Initialize game variables
             pos_index_sig <= 4;
             current_player <= "01";  -- Start with player 'O'
-            bram_we_sig <= "0";
-            update_disp_sig <= '1';  -- Trigger display update at reset
-            btn_select_prev <= '0';
-            btn_right_prev <= '0';
-            btn_left_prev <= '0';
-            btn_up_prev <= '0';
-            btn_down_prev <= '0';
+            display_seg    <= SEG_O;
+            display_an     <= "1110"; -- Activate first digit (active low)
+            update_disp_sig <= '1';   -- Trigger display update at reset
+            -- Reset game state signals
             game_board <= (others => "00");
             winner_flag <= '0';
             move_count <= 0;
             game_over <= '0';
-            winner_flag_var := '0';
-            game_over_var := '0';
-            -- Initialize SSD display to player 'O'
-            display_seg <= SEG_O;
-            display_an  <= "1110"; -- Activate first digit (active low)
+            -- Reset debounce counters and debounced signals
+            btn_right_cnt  <= 0;
+            btn_left_cnt   <= 0;
+            btn_up_cnt     <= 0;
+            btn_down_cnt   <= 0;
+            btn_select_cnt <= 0;
+            btn_right_debounced  <= '0';
+            btn_left_debounced   <= '0';
+            btn_up_debounced     <= '0';
+            btn_down_debounced   <= '0';
+            btn_select_debounced <= '0';
         elsif rising_edge(clk) then
-            bram_we_sig <= "0";       -- Default to no write
-            update_disp_sig <= '0';   -- Default to no update
+            case current_state is
+                when GAME =>
+                    bram_we_sig         <= "0";       -- Default to no write
+                    update_disp_sig <= '0';       -- Default to no update
 
-            -- Edge detection for buttons
-            btn_select_prev <= btn_select;
-            btn_right_prev  <= btn_right;
-            btn_left_prev   <= btn_left;
-            btn_up_prev     <= btn_up;
-            btn_down_prev   <= btn_down;
+                    -- Debounce Logic for btn_right
+                    if btn_right_debounced = btn_right then
+                        if btn_right_cnt < DEBOUNCE_THRESHOLD then
+                            btn_right_cnt <= btn_right_cnt + 1;
+                        end if;
+                    else
+                        btn_right_cnt <= 0;
+                    end if;
 
-            -- Initialize variables with current signal values
-            pos_index_var := pos_index_sig;
-            game_board_var := game_board; -- Copy signal to variable
-            winner_flag_var := winner_flag;
-            game_over_var := game_over;
+                    if btn_right_cnt = DEBOUNCE_THRESHOLD then
+                        btn_right_debounced <= btn_right;
+                    end if;
 
-            -- Combine button inputs into a single std_logic_vector
-            buttons := (btn_right and not btn_right_prev) &
-                       (btn_left and not btn_left_prev) &
-                       (btn_up and not btn_up_prev) &
-                       (btn_down and not btn_down_prev) &
-                       (btn_select and not btn_select_prev);
+                    -- Debounce Logic for btn_left
+                    if btn_left_debounced = btn_left then
+                        if btn_left_cnt < DEBOUNCE_THRESHOLD then
+                            btn_left_cnt <= btn_left_cnt + 1;
+                        end if;
+                    else
+                        btn_left_cnt <= 0;
+                    end if;
 
-            if game_over_var = '0' then
-                -- Game is ongoing
-                case buttons is
-                    when "10000" =>  -- btn_right pressed
-                        if (pos_index_var mod 3) < 2 then
-                            pos_index_var := pos_index_var + 1;
+                    if btn_left_cnt = DEBOUNCE_THRESHOLD then
+                        btn_left_debounced <= btn_left;
+                    end if;
+
+                    -- Debounce Logic for btn_up
+                    if btn_up_debounced = btn_up then
+                        if btn_up_cnt < DEBOUNCE_THRESHOLD then
+                            btn_up_cnt <= btn_up_cnt + 1;
                         end if;
-                    when "01000" =>  -- btn_left pressed
-                        if (pos_index_var mod 3) > 0 then
-                            pos_index_var := pos_index_var - 1;
+                    else
+                        btn_up_cnt <= 0;
+                    end if;
+
+                    if btn_up_cnt = DEBOUNCE_THRESHOLD then
+                        btn_up_debounced <= btn_up;
+                    end if;
+
+                    -- Debounce Logic for btn_down
+                    if btn_down_debounced = btn_down then
+                        if btn_down_cnt < DEBOUNCE_THRESHOLD then
+                            btn_down_cnt <= btn_down_cnt + 1;
                         end if;
-                    when "00100" =>  -- btn_up pressed
-                        if pos_index_var >= 3 then
-                            pos_index_var := pos_index_var - 3;
+                    else
+                        btn_down_cnt <= 0;
+                    end if;
+
+                    if btn_down_cnt = DEBOUNCE_THRESHOLD then
+                        btn_down_debounced <= btn_down;
+                    end if;
+
+                    -- Debounce Logic for btn_select
+                    if btn_select_debounced = btn_select then
+                        if btn_select_cnt < DEBOUNCE_THRESHOLD then
+                            btn_select_cnt <= btn_select_cnt + 1;
                         end if;
-                    when "00010" =>  -- btn_down pressed
-                        if pos_index_var <= 5 then
-                            pos_index_var := pos_index_var + 3;
-                        end if;
-                    when "00001" =>  -- btn_select pressed
+                    else
+                        btn_select_cnt <= 0;
+                    end if;
+
+                    if btn_select_cnt = DEBOUNCE_THRESHOLD then
+                        btn_select_debounced <= btn_select;
+                    end if;
+
+                    -- Edge detection for debounced buttons
+                    buttons := (btn_right_debounced and not btn_right_prev) &
+                               (btn_left_debounced  and not btn_left_prev)  &
+                               (btn_up_debounced    and not btn_up_prev)    &
+                               (btn_down_debounced  and not btn_down_prev)  &
+                               (btn_select_debounced and not btn_select_prev);
+
+                    -- Update previous button states
+                    btn_select_prev <= btn_select_debounced;
+                    btn_right_prev  <= btn_right_debounced;
+                    btn_left_prev   <= btn_left_debounced;
+                    btn_up_prev     <= btn_up_debounced;
+                    btn_down_prev   <= btn_down_debounced;
+
+                    -- Initialize variables with current signal values
+                    pos_index_var := pos_index_sig;
+                    game_board_var := game_board; -- Copy signal to variable
+                    winner_flag_var := winner_flag;
+                    game_over_var := game_over;
+
+                    -- Handle Button Presses
+                    if buttons = "00001" then -- btn_select pressed
                         -- Compute current position
                         cur_position_var := pos_map(pos_index_var);
                         -- Check if the cell is empty
@@ -171,24 +256,28 @@ begin
                             move_count <= move_count + 1;
 
                             -- Check for winner
-                            if move_count >= 5 then  -- Minimum moves needed for a win is 5
-                                winner_flag_var := check_winner(game_board_var);
-                            end if;
+                            --if move_count > 4 then  -- Minimum moves needed for a win is 5
+                             winner_flag_var := check_winner(game_board_var);
+                            --end if;
 
                             if winner_flag_var = '1' then
                                 game_over_var := '1';
-                                -- Update SSD to display winner
+                                -- Update SSD to display winning player across all digits
                                 if current_player = "01" then
                                     display_seg <= SEG_O; -- Display 'O' won
                                 else
                                     display_seg <= SEG_X; -- Display 'X' won
                                 end if;
-                                display_an <= "1110"; -- Activate first digit
-                            elsif move_count = 9 then
+                                display_an <= "0000"; -- Activate all digits (active low)
+                                update_disp_sig <= '1'; -- Trigger display update
+                                next_state <= END_GAME;
+                            elsif move_count = 8 then
                                 game_over_var := '1';
-                                -- Display 'Draw' on SSD (if possible), otherwise turn off segments
-                                display_seg <= SEG_OFF; -- All segments off
+                                -- Display 'Draw' on SSD
+                                display_seg <= SEG_OFF; -- All segments off (you can define a specific pattern for 'Draw' if desired)
                                 display_an <= "1111";    -- All digits off
+                                update_disp_sig <= '1'; -- Trigger display update
+                                next_state <= END_GAME;
                             else
                                 -- Toggle player
                                 if current_player = "01" then
@@ -198,41 +287,70 @@ begin
                                     current_player <= "01"; -- Switch to 'O'
                                     display_seg <= SEG_O;
                                 end if;
+                                update_disp_sig <= '1'; -- Trigger display update
                             end if;
 
-                            -- Reset position
+                            -- Reset position to center after move
                             pos_index_var := 4;  -- Reset to center position
-
-                            -- Trigger display update
-                            update_disp_sig <= '1';
+                            pos_index_sig <= pos_index_var;
+                            game_board   <= game_board_var;     -- Update game board
+                            winner_flag  <= winner_flag_var;
+                            game_over    <= game_over_var;
                         end if;
-                    when others =>
-                        -- No button pressed or multiple buttons pressed
-                        null;
-                end case;
-            else
-                -- Game is over
-                -- Optionally, you can add logic to reset the game if a button is pressed
-                null;
-            end if;
+                    elsif buttons /= "00000" then
+                        -- Handle Movement Buttons
+                        case buttons is
+                            when "10000" =>  -- btn_right pressed
+                                if (pos_index_var mod 3) < 2 then
+                                    pos_index_var := pos_index_var + 1;
+                                    pos_index_sig <= pos_index_var;
+                                end if;
+                            when "01000" =>  -- btn_left pressed
+                                if (pos_index_var mod 3) > 0 then
+                                    pos_index_var := pos_index_var - 1;
+                                    pos_index_sig <= pos_index_var;
+                                end if;
+                            when "00100" =>  -- btn_up pressed
+                                if pos_index_var >= 3 then
+                                    pos_index_var := pos_index_var - 3;
+                                    pos_index_sig <= pos_index_var;
+                                end if;
+                            when "00010" =>  -- btn_down pressed
+                                if pos_index_var <= 5 then
+                                    pos_index_var := pos_index_var + 3;
+                                    pos_index_sig <= pos_index_var;
+                                end if;
+                            when others =>
+                                -- No valid single button pressed
+                                null;
+                        end case;
+                    end if;
 
-            -- Update signals with variables
-            pos_index_sig <= pos_index_var;
-            game_board <= game_board_var;       -- Update signal
-            winner_flag <= winner_flag_var;
-            game_over <= game_over_var;
+                    -- Update game state signals
+                    game_board   <= game_board_var;     -- Update game board
+                    winner_flag  <= winner_flag_var;
+                    game_over    <= game_over_var;
 
-        end if;
-    end process;
+                when END_GAME =>
+                    -- In END_GAME state, maintain the winning display until reset
+                    -- No further actions; waiting for external reset
+                    null;
 
-    -- Output assignments
-    bram_we        <= bram_we_sig;
-    update_display <= update_disp_sig;
-    bram_addr      <= bram_addr_sig;
-    bram_din       <= bram_din_sig;
+                when others =>
+                    null;
+               end case;
+           end if;
+        end process;
 
-    -- SSD Outputs
-    cat_s <= display_seg;
-    an_s  <= display_an;
+
+        -- Output Assignments
+        bram_we        <= bram_we_sig;
+        update_display <= update_disp_sig;
+        bram_addr      <= bram_addr_sig;
+        bram_din       <= bram_din_sig;
+
+        -- Seven-Segment Display Outputs
+        cat_s <= display_seg;
+        an_s  <= display_an;
 
 end Behavioral;
