@@ -1,0 +1,7 @@
+memory_initialization_radix=16;
+memory_initialization_vector=
+0A,20,20,20,7C,20,20,20,7C,20,20,20,0D,0A,
+2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,0D,0A,
+20,20,20,7C,20,20,20,7C,20,20,20,0D,0A,
+2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,2D,0D,0A,
+20,20,20,7C,20,20,20,7C,20,20,20,0D,0A,00;

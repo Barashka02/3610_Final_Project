@@ -13,7 +13,7 @@ entity Controller is
         btn_select            : in  STD_LOGIC;
         bram_addr             : out STD_LOGIC_VECTOR(6 downto 0);
         bram_din              : out STD_LOGIC_VECTOR(7 downto 0);
-        bram_we               : out STD_LOGIC_VECTOR(0 downto 0);
+        bram_we               : out STD_LOGIC;
         update_display        : out STD_LOGIC;
         an_s                  : out STD_LOGIC_VECTOR (3 downto 0); 
         cat_s                 : out STD_LOGIC_VECTOR (6 downto 0);
@@ -36,7 +36,7 @@ architecture Behavioral of Controller is
     signal move_count      : INTEGER range 0 to 9 := 0;           -- Counts the number of moves made
     signal game_over       : STD_LOGIC := '0';                    -- '1' when game is over
 
-    signal bram_we_sig     : STD_LOGIC_VECTOR(0 downto 0) := "0";
+    signal bram_we_sig     : STD_LOGIC := '0';
     signal update_disp_sig : STD_LOGIC := '0';
     signal bram_addr_sig   : STD_LOGIC_VECTOR(6 downto 0) := (others => '0');
     signal bram_din_sig    : STD_LOGIC_VECTOR(7 downto 0) := (others => '0');
@@ -49,7 +49,7 @@ architecture Behavioral of Controller is
     
     signal music_trigger_move       : STD_LOGIC := '0';
     signal music_trigger_game_over  : STD_LOGIC := '0';
-    -- Removed 'reseTting' and 'resetting' signals
+
     -- Debounce Parameters
     constant DEBOUNCE_THRESHOLD : integer := 100000; -- Adjust based on clock frequency and desired debounce time
 
@@ -71,12 +71,16 @@ architecture Behavioral of Controller is
     constant SEG_OFF : STD_LOGIC_VECTOR(6 downto 0) := "1111111"; -- All segments off
     constant SEG_O   : STD_LOGIC_VECTOR(6 downto 0) := "0000001"; -- Segments to display 'O'
     constant SEG_X   : STD_LOGIC_VECTOR(6 downto 0) := "1001000"; -- Segments to display 'X'
-    signal display_seg : STD_LOGIC_VECTOR(6 downto 0);
-    signal display_an  : STD_LOGIC_VECTOR(3 downto 0);
+    signal display_seg : STD_LOGIC_VECTOR(6 downto 0) := SEG_OFF;
+    signal display_an  : STD_LOGIC_VECTOR(3 downto 0) := "1111";
 
     -- FSM States
-    type state_type is (GAME, END_GAME);
-    signal current_state, next_state : state_type := GAME;
+    type state_type is (RESET_BRAM, GAME, END_GAME);
+    signal current_state, next_state : state_type := RESET_BRAM;
+
+    -- BRAM Reset Counter
+    signal reset_counter : integer range 0 to 8 := 0;
+    signal resetting      : STD_LOGIC := '0';
 
     -- Declare integer_array and combo_type types
     type integer_array is array (0 to 2) of integer;
@@ -107,17 +111,49 @@ architecture Behavioral of Controller is
     end function;
 
 begin
-    -- FSM State Transition
+    -- -------------------------------
+    -- 1. State Register Process (Sequential)
+    -- -------------------------------
     process(clk, rst)
     begin
         if rst = '1' then
-            current_state <= GAME;
+            current_state <= RESET_BRAM;
         elsif rising_edge(clk) then
             current_state <= next_state;
         end if;
     end process;
 
-    -- Main Process Handling All States
+    -- -------------------------------
+    -- 2. Next State Logic Process (Combinational)
+    -- -------------------------------
+    process(current_state, resetting, reset_counter, game_over)
+    begin
+        case current_state is
+            when RESET_BRAM =>
+                if resetting = '1' and reset_counter = 8 then
+                    next_state <= GAME;
+                else
+                    next_state <= RESET_BRAM;
+                end if;
+
+            when GAME =>
+                if game_over = '1' then
+                    next_state <= END_GAME;
+                else
+                    next_state <= GAME;
+                end if;
+
+            when END_GAME =>
+                next_state <= END_GAME;
+
+            when others =>
+                next_state <= GAME;
+        end case;
+    end process;
+
+    -- -------------------------------
+    -- 3. State Action Process (Sequential)
+    -- -------------------------------
     process(clk, rst)
         variable buttons           : STD_LOGIC_VECTOR(4 downto 0);
         variable pos_index_var     : integer range 0 to 8;
@@ -149,13 +185,37 @@ begin
             btn_up_debounced     <= '0';
             btn_down_debounced   <= '0';
             btn_select_debounced <= '0';
-                    music_trigger_move      <= '0';
-        music_trigger_game_over <= '0';
+            music_trigger_move      <= '0';
+            music_trigger_game_over <= '0';
+            
+            -- Reset BRAM reset counter and flag
+            reset_counter <= 0;
+            resetting <= '1';
+
+            -- Initialize BRAM write signals for the first address
+            bram_we_sig <= '1';
+            bram_addr_sig <= std_logic_vector(to_unsigned(pos_map(reset_counter), 7));
+            bram_din_sig <= x"20";
         elsif rising_edge(clk) then
             case current_state is
+                when RESET_BRAM =>
+                    if resetting = '1' then
+                        if reset_counter < 9 then
+                            -- Continue writing to BRAM
+                            bram_addr_sig <= std_logic_vector(to_unsigned(pos_map(reset_counter), 7));
+                            bram_din_sig <= x"20";
+                            bram_we_sig <= '1';
+                            reset_counter <= reset_counter + 1;
+                        else
+                            -- Completed BRAM reset
+                            resetting <= '0';
+                            bram_we_sig <= '0';
+                        end if;
+                    end if;
+
                 when GAME =>
-                    bram_we_sig         <= "0";       -- Default to no write
-                    update_disp_sig <= '0';       -- Default to no update
+                    bram_we_sig         <= '0';       -- Default to no write
+                    update_disp_sig     <= '0';       -- Default to no update
 
                     -- Debounce Logic for btn_right
                     if btn_right_debounced = btn_right then
@@ -249,7 +309,7 @@ begin
                         -- Check if the cell is empty
                         if game_board_var(pos_index_var) = "00" then
                             -- Write player's symbol to BRAM at cur_position_var
-                            bram_we_sig <= "1";
+                            bram_we_sig <= '1';
                             bram_addr_sig <= std_logic_vector(to_unsigned(cur_position_var, 7));
                             if current_player = "01" then
                                 bram_din_sig <= x"4F"; -- ASCII 'O'
@@ -263,9 +323,7 @@ begin
                             move_count <= move_count + 1;
 
                             -- Check for winner
-                            --if move_count > 4 then  -- Minimum moves needed for a win is 5
-                             winner_flag_var := check_winner(game_board_var);
-                            --end if;
+                            winner_flag_var := check_winner(game_board_var);
 
                             if winner_flag_var = '1' then
                                 game_over_var := '1';
@@ -277,7 +335,6 @@ begin
                                 end if;
                                 display_an <= "0000"; -- Activate all digits (active low)
                                 update_disp_sig <= '1'; -- Trigger display update
-                                next_state <= END_GAME;
                                 music_trigger_game_over <= '1';
                             elsif move_count = 8 then
                                 game_over_var := '1';
@@ -285,7 +342,6 @@ begin
                                 display_seg <= SEG_OFF; -- All segments off (you can define a specific pattern for 'Draw' if desired)
                                 display_an <= "1111";    -- All digits off
                                 update_disp_sig <= '1'; -- Trigger display update
-                                next_state <= END_GAME;
                             else
                                 -- Toggle player
                                 if current_player = "01" then
@@ -347,29 +403,31 @@ begin
 
                 when others =>
                     null;
-               end case;
-               
-             if music_trigger_move = '1' then
+            end case;
+
+            -- Reset music triggers
+            if music_trigger_move = '1' then
                 music_trigger_move <= '0';
             end if;
             if music_trigger_game_over = '1' then
                 music_trigger_game_over <= '0';
             end if;
-           end if;
-        end process;
+        end if;
+    end process;
 
+    -- -------------------------------
+    -- 4. Output Assignments
+    -- -------------------------------
+    bram_we        <= bram_we_sig;
+    update_display <= update_disp_sig;
+    bram_addr      <= bram_addr_sig;
+    bram_din       <= bram_din_sig;
 
-        -- Output Assignments
-        bram_we        <= bram_we_sig;
-        update_display <= update_disp_sig;
-        bram_addr      <= bram_addr_sig;
-        bram_din       <= bram_din_sig;
-
-        -- Seven-Segment Display Outputs
-        cat_s <= display_seg;
-        an_s  <= display_an;
-        
-        play_move_music       <= music_trigger_move;
-        play_game_over_melody <= music_trigger_game_over;
+    -- Seven-Segment Display Outputs
+    cat_s <= display_seg;
+    an_s  <= display_an;
+    
+    play_move_music       <= music_trigger_move;
+    play_game_over_melody <= music_trigger_game_over;
 
 end Behavioral;
