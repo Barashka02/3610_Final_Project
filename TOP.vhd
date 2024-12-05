@@ -11,8 +11,11 @@ entity TOP is
         btn_down    : in  STD_LOGIC;
         btn_select  : in  STD_LOGIC;
         sdata_out   : out STD_LOGIC;
-        an      : out STD_LOGIC_VECTOR (3 downto 0);
-        cat     : out STD_LOGIC_VECTOR (6 downto 0)
+        an          : out STD_LOGIC_VECTOR (3 downto 0);
+        cat         : out STD_LOGIC_VECTOR (6 downto 0);
+        freq        : out STD_LOGIC;
+        gain        : out STD_LOGIC;
+        shutdown    : out STD_LOGIC
     );
 end TOP;
 
@@ -20,20 +23,21 @@ architecture Behavioral of TOP is
     -- Component Declarations
     component Controller is
         Port (
-            clk           : in  STD_LOGIC;
-            rst           : in  STD_LOGIC;
-            btn_right     : in  STD_LOGIC;
-            btn_left      : in  STD_LOGIC;
-            btn_up        : in  STD_LOGIC;
-            btn_down      : in  STD_LOGIC;
-            btn_select    : in  STD_LOGIC;
-            bram_addr     : out STD_LOGIC_VECTOR(6 downto 0);
-            bram_din      : out STD_LOGIC_VECTOR(7 downto 0);
-            bram_we       : out STD_LOGIC_VECTOR(0 downto 0);
-            update_display: out STD_LOGIC;
-            an_s        : out STD_LOGIC_VECTOR (3 downto 0); 
-            cat_s      : out STD_LOGIC_VECTOR (6 downto 0) 
-            -- Removed cur_position output
+            clk                   : in  STD_LOGIC;
+            rst                   : in  STD_LOGIC;
+            btn_right             : in  STD_LOGIC;
+            btn_left              : in  STD_LOGIC;
+            btn_up                : in  STD_LOGIC;
+            btn_down              : in  STD_LOGIC;
+            btn_select            : in  STD_LOGIC;
+            bram_addr             : out STD_LOGIC_VECTOR(6 downto 0);
+            bram_din              : out STD_LOGIC_VECTOR(7 downto 0);
+            bram_we               : out STD_LOGIC_VECTOR(0 downto 0);
+            update_display        : out STD_LOGIC;
+            an_s                  : out STD_LOGIC_VECTOR (3 downto 0); 
+            cat_s                 : out STD_LOGIC_VECTOR (6 downto 0);
+            play_move_music       : out STD_LOGIC; -- Trigger to play move music
+            play_game_over_melody : out STD_LOGIC  -- Trigger to play game over melody
         );
     end component;
 
@@ -47,7 +51,6 @@ architecture Behavioral of TOP is
             uart_load    : out STD_LOGIC;
             busy         : in  STD_LOGIC;
             update       : in  STD_LOGIC
-            -- Removed cur_position input
         );
     end component;
 
@@ -73,6 +76,18 @@ architecture Behavioral of TOP is
         );
     end component;
 
+    component MusicPlayer is
+        Port (
+            clk                  : in  STD_LOGIC;
+            rst                  : in  STD_LOGIC;
+            play_move_music      : in  STD_LOGIC;
+            play_game_over_melody : in  STD_LOGIC;
+            freq                 : out STD_LOGIC;
+            gain                 : out STD_LOGIC;
+            shutdown             : out STD_LOGIC
+        );
+    end component;
+
     -- Signals for interconnections
     signal uart_data       : STD_LOGIC_VECTOR(7 downto 0);
     signal uart_load       : STD_LOGIC;
@@ -80,29 +95,33 @@ architecture Behavioral of TOP is
     signal bram_dout       : STD_LOGIC_VECTOR(7 downto 0);
     signal bram_addr_ctrl  : STD_LOGIC_VECTOR(6 downto 0);
     signal bram_addr_disp  : STD_LOGIC_VECTOR(6 downto 0);
-    signal bram_addr       : STD_LOGIC_VECTOR(6 downto 0);
+    signal bram_addr_mux   : STD_LOGIC_VECTOR(6 downto 0);
     signal bram_din        : STD_LOGIC_VECTOR(7 downto 0);
     signal bram_we         : STD_LOGIC_VECTOR(0 downto 0);
     signal update_display  : STD_LOGIC;
+    signal play_move_music_sig       : STD_LOGIC;
+    signal play_game_over_melody_sig : STD_LOGIC;
+
 begin
     -- Instantiate the Controller
-    Controller_inst: Controller
-        Port Map (
-            clk            => clk,
-            rst            => rst,
-            btn_right      => btn_right,
-            btn_left       => btn_left,
-            btn_up         => btn_up,
-            btn_down       => btn_down,
-            btn_select     => btn_select,
-            bram_addr      => bram_addr_ctrl,
-            bram_din       => bram_din,
-            bram_we        => bram_we,
-            update_display => update_display,
-            cat_s            => cat,
-            an_s             => an
-            -- Removed cur_position mapping
-        );
+Controller_inst: Controller
+    Port Map (
+        clk                   => clk,
+        rst                   => rst,
+        btn_right             => btn_right,
+        btn_left              => btn_left,
+        btn_up                => btn_up,
+        btn_down              => btn_down,
+        btn_select            => btn_select,
+        bram_addr             => bram_addr_ctrl,
+        bram_din              => bram_din,
+        bram_we               => bram_we,
+        update_display        => update_display,
+        an_s                  => an,
+        cat_s                 => cat,
+        play_move_music       => play_move_music_sig,        -- Ensure this is connected
+        play_game_over_melody => play_game_over_melody_sig   -- Ensure this is connected
+    );
 
     -- Instantiate the SimpleBoardDisplay
     DisplayFSM: SimpleBoardDisplay
@@ -115,7 +134,6 @@ begin
             uart_load    => uart_load,
             busy         => uart_busy,
             update       => update_display
-            -- Removed cur_position mapping
         );
 
     -- Instantiate the UART Transmitter
@@ -125,7 +143,7 @@ begin
             pdata_s => uart_data,
             load_s  => uart_load,
             busy_s  => uart_busy,
-            done_s  => open,
+            done_s  => open, -- Not used
             sdata_s => sdata_out
         );
 
@@ -135,11 +153,24 @@ begin
             clka  => clk,
             ena   => '1',
             wea   => bram_we,
-            addra => bram_addr,
+            addra => bram_addr_mux,
             dina  => bram_din,
             douta => bram_dout
         );
 
+    -- Instantiate the MusicPlayer
+    MusicPlayer_inst: MusicPlayer
+        Port Map (
+            clk                  => clk,
+            rst                  => rst,
+            play_move_music      => play_move_music_sig,
+            play_game_over_melody => play_game_over_melody_sig,
+            freq                 => freq,
+            gain                 => gain,
+            shutdown             => shutdown
+        );
+
     -- BRAM address multiplexing
-    bram_addr <= bram_addr_ctrl when bram_we = "1" else bram_addr_disp;
+    bram_addr_mux <= bram_addr_ctrl when bram_we = "1" else bram_addr_disp;
+
 end Behavioral;

@@ -4,19 +4,21 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity Controller is
     Port (
-        clk           : in  STD_LOGIC;
-        rst           : in  STD_LOGIC;
-        btn_right     : in  STD_LOGIC;
-        btn_left      : in  STD_LOGIC;
-        btn_up        : in  STD_LOGIC;
-        btn_down      : in  STD_LOGIC;
-        btn_select    : in  STD_LOGIC;
-        bram_addr     : out STD_LOGIC_VECTOR(6 downto 0);
-        bram_din      : out STD_LOGIC_VECTOR(7 downto 0);
-        bram_we       : out STD_LOGIC_VECTOR(0 downto 0);
-        update_display: out STD_LOGIC;
-        an_s          : out STD_LOGIC_VECTOR (3 downto 0); 
-        cat_s         : out STD_LOGIC_VECTOR (6 downto 0) 
+        clk                   : in  STD_LOGIC;
+        rst                   : in  STD_LOGIC;
+        btn_right             : in  STD_LOGIC;
+        btn_left              : in  STD_LOGIC;
+        btn_up                : in  STD_LOGIC;
+        btn_down              : in  STD_LOGIC;
+        btn_select            : in  STD_LOGIC;
+        bram_addr             : out STD_LOGIC_VECTOR(6 downto 0);
+        bram_din              : out STD_LOGIC_VECTOR(7 downto 0);
+        bram_we               : out STD_LOGIC_VECTOR(0 downto 0);
+        update_display        : out STD_LOGIC;
+        an_s                  : out STD_LOGIC_VECTOR (3 downto 0); 
+        cat_s                 : out STD_LOGIC_VECTOR (6 downto 0);
+        play_move_music       : out STD_LOGIC; -- Trigger to play move music
+        play_game_over_melody : out STD_LOGIC  -- Trigger to play game over melody
     );
 end Controller;
 
@@ -44,6 +46,9 @@ architecture Behavioral of Controller is
     signal btn_left_prev   : STD_LOGIC := '0';
     signal btn_up_prev     : STD_LOGIC := '0';
     signal btn_down_prev   : STD_LOGIC := '0';
+    
+    signal music_trigger_move       : STD_LOGIC := '0';
+    signal music_trigger_game_over  : STD_LOGIC := '0';
     -- Removed 'reseTting' and 'resetting' signals
     -- Debounce Parameters
     constant DEBOUNCE_THRESHOLD : integer := 100000; -- Adjust based on clock frequency and desired debounce time
@@ -144,6 +149,8 @@ begin
             btn_up_debounced     <= '0';
             btn_down_debounced   <= '0';
             btn_select_debounced <= '0';
+                    music_trigger_move      <= '0';
+        music_trigger_game_over <= '0';
         elsif rising_edge(clk) then
             case current_state is
                 when GAME =>
@@ -271,6 +278,7 @@ begin
                                 display_an <= "0000"; -- Activate all digits (active low)
                                 update_disp_sig <= '1'; -- Trigger display update
                                 next_state <= END_GAME;
+                                music_trigger_game_over <= '1';
                             elsif move_count = 8 then
                                 game_over_var := '1';
                                 -- Display 'Draw' on SSD
@@ -288,6 +296,7 @@ begin
                                     display_seg <= SEG_O;
                                 end if;
                                 update_disp_sig <= '1'; -- Trigger display update
+                                music_trigger_move <= '1';
                             end if;
 
                             -- Reset position to center after move
@@ -339,6 +348,13 @@ begin
                 when others =>
                     null;
                end case;
+               
+             if music_trigger_move = '1' then
+                music_trigger_move <= '0';
+            end if;
+            if music_trigger_game_over = '1' then
+                music_trigger_game_over <= '0';
+            end if;
            end if;
         end process;
 
@@ -352,5 +368,8 @@ begin
         -- Seven-Segment Display Outputs
         cat_s <= display_seg;
         an_s  <= display_an;
+        
+        play_move_music       <= music_trigger_move;
+        play_game_over_melody <= music_trigger_game_over;
 
 end Behavioral;
